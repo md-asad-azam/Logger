@@ -2,43 +2,47 @@
 #include <iostream>
 #include <fstream>
 #include <thread>
+#include <vector>
 #include "Logger.h"
 #include "ConfigParser.h"
 
 
+void print()
+{
+    TRACE("Improved Performance");
+    INFO("Reduced Latency");
+    DEBUG("Thread Safety");
+    FATL("Optimal");
+    WARN("Blah blah");
+    DEBUG("blah blah blah blah");
+    DEBUG("blah blah blah blah");
+}
 
-void loggerTest(int n) {
+
+void loggerTest() {
 
     Logger& logger = Logger::getInstance();
     logger.setLoggingLevel(Constant::LogPriority::trace);
-          
-    //Logger::RegisterFilePath("C:/Users/mdasa/Downloads/my_logger_output/output.log");
-    logger.TRACEsc("Traceing" + std::to_string(n));
-    logger.DEBUGsc("DEBUGsc" + std::to_string(n));
-    logger.INFOsc("INFOsc" + std::to_string(n));
-    logger.WARNsc("WARNsc" + std::to_string(n));
-    logger.FATLsc("FATLsc" + std::to_string(n));
+    logger.RegisterLogger("E:\\MyProject_cpp\\Logger\\Logger\\src\\AnyComponent.cfg");
+
+    std::thread worker[10];
+    for (int i = 0; i < 10; i++) { worker[i] = std::thread(print); }
+    for (int i = 0; i < 10; i++) { worker[i].join(); }
+    
 
 }
 
+
 int main()
 {
-    loggerTest(1);
-
-    /*std::thread worker[10];
-
-    for (int i = 0; i < 10; i++) {
-        worker[i] = std::thread(loggerTest, i);
-    }
-
-    for (int i = 0; i < 10; i++) {
-        worker[i].join();
-    }*/
+    auto start = std::chrono::high_resolution_clock::now();
 
 
-    ConfigParser::parseCfgFile("./AnyComponent.cfg");
-    std::cout << ConfigParser::getSetting("Logger.FilePath");
+    loggerTest();
+    
 
-
+    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> time = end - start;
+    std::cout << "\n\n\n---- Total execution time = " << time.count() << std::endl;
     return 0;
 }

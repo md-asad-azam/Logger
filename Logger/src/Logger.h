@@ -6,149 +6,63 @@
 #include <iomanip>
 #include <direct.h>
 #include <mutex>
+#include <algorithm>
 #include "ConfigParser.h"
+#include "Utils.h"
 
 
 
-namespace Constant {
+#define TRACE(msg,...) Logger::getInstance().TraceImpl(__FILE__, __func__, __LINE__, msg, __VA_ARGS__)
+#define DEBUG(msg,...) Logger::getInstance().DebugImpl(__FILE__, __func__, __LINE__, msg, __VA_ARGS__)
+#define INFO(msg,...) Logger::getInstance().InfoImpl(__FILE__, __func__, __LINE__, msg, __VA_ARGS__)
+#define WARN(msg,...) Logger::getInstance().WarnImpl(__FILE__, __func__, __LINE__, msg, __VA_ARGS__)
+#define FATL(msg,...) Logger::getInstance().FatlImpl(__FILE__, __func__, __LINE__, msg, __VA_ARGS__)
 
-	enum LogPriority {
-		trace,
-		debug,
-		info,
-		warn,
-		fatl
-	};
-
-	enum Clock {
-		year,
-		month,
-		day,
-		date,
-		hours,
-		minutes,
-		seconds,
-		microseconds,
-		time
-	};
-
-	struct LogLevel {
-		static std::string as_string(LogPriority priority) {
-			switch (priority) {
-			case LogPriority::trace: return "Trce";
-			case LogPriority::debug: return "Dbug";
-			case LogPriority::info: return "Info";
-			case LogPriority::warn: return "Warn";
-			case LogPriority::fatl: return "Fatl";
-			default: return "Unknown";
-			}
-		}
-	};
-}
 
 class Logger {
 
 private:
-	Logger() {}
-	~Logger() {
-		foutput << "\n--- Log Closed ---\n\n";
+	Logger() {
+		Logger::m_filePath = "";
+		Logger::m_lengthFileFunc = 10;
+		Logger::m_fileLoggingEnabled = false;
+		Logger::m_loggingLevel = Constant::LogPriority::info;
 	}
-
-	inline std::string getDateTime(Constant::Clock clock) {
-		std::tm tm;
-		std::ostringstream timeString;
-		auto currentTime = std::chrono::system_clock::now();
-		auto time = std::chrono::system_clock::to_time_t(currentTime);
-		localtime_s(&tm, &time);
-
-		switch (clock) {
-			case Constant::Clock::date: { 
-				timeString << std::put_time(&tm, "%d-%m-%Y");
-				break;
-			}
-			case Constant::Clock::year: { 
-				timeString << std::put_time(&tm, "%Y");
-				break; 
-			}
-			case Constant::Clock::month: { 
-
-				timeString << std::put_time(&tm, "%m");
-				break; 
-			}
-			case Constant::Clock::day: { 
-				timeString << std::put_time(&tm, "%d");
-				break; 
-			}
-			case Constant::Clock::time: { 
-				auto microseconds = std::chrono::duration_cast<std::chrono::microseconds>(currentTime.time_since_epoch()).count() % 1000000;
-				timeString << std::put_time(&tm, "%H:%M:%S") << ":" << std::setw(6) << std::setfill('0') << microseconds;
-				break;
-			}
-			case Constant::Clock::hours: { 
-				timeString << std::put_time(&tm, "%H");
-				break; 
-			}
-			case Constant::Clock::minutes: { 
-				timeString << std::put_time(&tm, "%M");
-				break; 
-			}
-			case Constant::Clock::seconds: { 
-				timeString << std::put_time(&tm, "%S");
-				break; 
-			}
-			case Constant::Clock::microseconds: { 
-				auto microseconds = std::chrono::duration_cast<std::chrono::microseconds>(currentTime.time_since_epoch()).count() % 1000000;
-				timeString << std::setw(6) << std::setfill('0') << microseconds;
-				break;
-			}
+	~Logger() {
+		std::string logMsg = "\n--- Log Closed at " + getDateTime(Constant::Clock::time) + " ---\n\n\n";
+		if (foutput.is_open()) {
+			foutput << logMsg;
+			foutput.close();
 		}
-		return timeString.str();
+		else {
+			std::cout << logMsg;
+		}
+		std::cout << "Logging process ended\n\n\n";
 	}
 	
 	template<typename... Args>
-	void log(Constant::LogPriority level, std::string msg, Args... args) {
+	void log(Constant::LogPriority level, std::string fileName, std::string funcName, int line, std::string msg, Args... args) {
+		std::this_thread::sleep_for(std::chrono::milliseconds(500));
+		if (level >= m_loggingLevel) { return; }
+
 		std::unique_lock<std::mutex> Lock(mtx);
-		if (m_fileLoggingEnabled && level >= m_loggingLevel) {
-			foutput << getDateTime(Constant::Clock::time) << "\t";
-			foutput << Constant::LogLevel::as_string(level) << "\t";
-			foutput << std::this_thread::get_id()<< "\t";
-			foutput << msg << "\n";
-		} else {
-			std::cout << getDateTime(Constant::Clock::time) << "\t";
-			std::cout << Constant::LogLevel::as_string(level) << "\t";
-			std::cout << std::this_thread::get_id() << "\t";
-			std::cout << msg << "\n";
-		}
+		std::ostringstream oss;
+		oss << msg;
+		(void)std::initializer_list<int>{(oss << args, 0)...};
+
+		size_t pos = fileName.find_last_of('/\\');
+		if (pos != std::string::npos) { fileName = fileName.substr(pos + 1); }
+		if (fileName.length() > m_lengthFileFunc) { fileName = fileName.substr(0, m_lengthFileFunc); }
+		if (funcName.length() > m_lengthFileFunc) { funcName = funcName.substr(0, m_lengthFileFunc); }
+		
+		std::ostream& output = (m_fileLoggingEnabled) ? foutput : std::cout;
+		output << getDateTime(Constant::Clock::time) << "  |  ";
+		output << Constant::LogLevel::unmapLoggingLevel(level) << "  |  ";
+		output << std::this_thread::get_id() << "  |  ";
+		output << "[" << fileName << ":" << funcName << ":" << line << "]" << "  |  ";
+		output << oss.str() << "\n";
 		Lock.unlock();
 	}
-
-
-	bool checkOrCreateFilePath(std::string& file_path) {
-		size_t dotPos = file_path.find_last_of('.');
-		size_t slashPos = file_path.find_last_of('/');
-		if (dotPos == std::string::npos || slashPos == std::string::npos) {
-			std::cerr << "Error: Incorrect file path.";
-			return false;
-		}
-		// modifying file path to add /dd-mm-yyyy/filename-hh.log
-		file_path = file_path.substr(0, slashPos) + "/" + getDateTime(Constant::Clock::date) + file_path.substr(slashPos, dotPos - slashPos) + "-" + getDateTime(Constant::Clock::hours) + file_path.substr(dotPos);
-		
-		struct stat buffer;
-		size_t lastSlashPos = file_path.find_last_of('/');
-		std::string directoryPath = file_path.substr(0, lastSlashPos);
-		if (stat(directoryPath.c_str(), &buffer) == 0) {
-			std::cout << "File path: " << directoryPath << " exists." << std::endl;
-			return true;
-		}
-		
-		if (_mkdir(directoryPath.c_str()) != 0) {
-			std::cerr << "Error: Failed to create directory: " << directoryPath << std::endl;
-			return false;
-		}
-		
-		return true;
-	}
-
 
 public:
 	Logger(Logger&) = delete;
@@ -163,69 +77,72 @@ public:
 		m_loggingLevel = level;
 	}
 
-	void RegisterLogger(std::string filePath, std::string configPath) {
+	void RegisterLogger(std::string configPath) {
 
-		file_path = filePath;
+		ConfigParser::ParseCfgFile(configPath);
+		m_fileLoggingEnabled = ConfigParser::Get<bool>("Logger.EnableFileLogging", m_fileLoggingEnabled);
+		std::string lvl = ConfigParser::Get<std::string>("Logger.LoggingLevel", "info");
+		m_lengthFileFunc = ConfigParser::Get<int>("Logger.FileFuncDisplayLength", m_lengthFileFunc);
 
-		ConfigParser::parseCfgFile(configPath);
-		
+		//transforms the debug level to lowercase
+		std::transform(lvl.begin(), lvl.end(), lvl.begin(), [](unsigned char c) {
+			return std::tolower(c);
+		});
+
+		m_loggingLevel = Constant::LogLevel::mapLoggingLevel(lvl);
+
 		if (m_fileLoggingEnabled) {
-
-			if (!checkOrCreateFilePath(file_path)) {
+			m_filePath = ConfigParser::Get<std::string>("Logger.FilePath", "");
+			if (!checkOrCreateFilePath(m_filePath)) {
 				std::cerr << "Error: file path was not present and couldn't be created.\n";
 				return;
 			}
 
-			foutput.open(file_path, std::ios::app);
+			foutput.open(m_filePath, std::ios::app);
 			if (foutput.is_open()) {
-				std::cout << "Opened " << file_path << " for logging.";
-				foutput << "--- New log started at " << getDateTime(Constant::Clock::time) << " ---" << "\n\n";
+				std::cout << "Opened file: " << m_filePath << " for logging." << std::endl;
+				foutput << "--- New log started at " << getDateTime(Constant::Clock::time) << " ---\n\n";
 			}
 			else {
 				std::cerr << "Error: Couldn't open the file stream.\n";
 			}
 		} else {
+			std::cout << "--- New log started at " << getDateTime(Constant::Clock::time) << " ---\n\n";
 			std::cout << "File logging is disabled, didn't register file path.\n";
 		}
 	}
 	
+
 	template<typename... Args>
-	void TRACEsc(std::string msg, Args... args) {
-		log(Constant::LogPriority::trace, msg, args...);
+	void TraceImpl(std::string fileName, std::string funcName, int line, std::string msg, Args... args) {
+		log(Constant::LogPriority::trace, fileName, funcName, line, msg, args...);
 	}
 
 	template<typename... Args>
-	void DEBUGsc(std::string msg, Args... args) {
-		log(Constant::LogPriority::debug, msg, args...);
+	void DebugImpl(std::string fileName, std::string funcName, int line, std::string msg, Args... args) {
+		log(Constant::LogPriority::debug, fileName, funcName, line, msg, args...);
 	}
 
 	template<typename... Args>
-	void INFOsc(std::string msg, Args... args) {
-		log(Constant::LogPriority::info, msg, args...);
+	void InfoImpl(std::string fileName, std::string funcName, int line, std::string msg, Args... args) {
+		log(Constant::LogPriority::info, fileName, funcName, line, msg, args...);
 	}
 
 	template<typename... Args>
-	void WARNsc(std::string msg, Args... args) {
-		log(Constant::LogPriority::warn, msg, args...);
+	void WarnImpl(std::string fileName, std::string funcName, int line, std::string msg, Args... args) {
+		log(Constant::LogPriority::warn, fileName, funcName, line, msg, args...);
 	}
 
 	template<typename... Args>
-	void FATLsc(std::string msg, Args... args) {
-		log(Constant::LogPriority::fatl, msg, args...);
+	void FatlImpl(std::string fileName, std::string funcName, int line, std::string msg, Args... args) {
+		log(Constant::LogPriority::fatl, fileName, funcName, line, msg, args...);
 	}
 
 private:
-	static std::mutex mtx;
-	static std::ofstream foutput;
-	static std::string file_path;
-	static std::string config_path;
-	static bool m_fileLoggingEnabled;
-	static Constant::LogPriority m_loggingLevel;
+	std::mutex mtx;
+	int m_lengthFileFunc;
+	std::ofstream foutput;
+	std::string m_filePath;
+	bool m_fileLoggingEnabled;
+	Constant::LogPriority m_loggingLevel;
 };
-
-std::mutex Logger::mtx;
-std::ofstream Logger::foutput;
-std::string Logger::file_path;
-std::string Logger::config_path;
-bool Logger::m_fileLoggingEnabled = true;
-Constant::LogPriority Logger::m_loggingLevel = Constant::LogPriority::info;

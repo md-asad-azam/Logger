@@ -24,6 +24,7 @@
   <ItemGroup>
     <ClInclude Include="src\ConfigParser.h" />
     <ClInclude Include="src\Logger.h" />
+    <ClInclude Include="src\Utils.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\Logger.cpp" />
