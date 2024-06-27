@@ -7,29 +7,57 @@
 #include <direct.h>
 #include <mutex>
 #include <algorithm>
+#include <queue>
+#include <condition_variable>
 #include "ConfigParser.h"
 #include "Utils.h"
 
 
 
-#define TRACE(msg,...) Logger::getInstance().TraceImpl(__FILE__, __func__, __LINE__, msg, __VA_ARGS__)
-#define DEBUG(msg,...) Logger::getInstance().DebugImpl(__FILE__, __func__, __LINE__, msg, __VA_ARGS__)
-#define INFO(msg,...) Logger::getInstance().InfoImpl(__FILE__, __func__, __LINE__, msg, __VA_ARGS__)
-#define WARN(msg,...) Logger::getInstance().WarnImpl(__FILE__, __func__, __LINE__, msg, __VA_ARGS__)
-#define FATL(msg,...) Logger::getInstance().FatlImpl(__FILE__, __func__, __LINE__, msg, __VA_ARGS__)
+#define TRACE(msg,...) Logger::getInstance().AddLog(Constant::LogPriority::trace, __FILE__, __func__, __LINE__, std::this_thread::get_id(), msg)
+#define DEBUG(msg,...) Logger::getInstance().AddLog(Constant::LogPriority::debug, __FILE__, __func__, __LINE__, std::this_thread::get_id(), msg)
+#define INFO(msg,...) Logger::getInstance().AddLog(Constant::LogPriority::info, __FILE__, __func__, __LINE__, std::this_thread::get_id(), msg)
+#define WARN(msg,...) Logger::getInstance().AddLog(Constant::LogPriority::warn, __FILE__, __func__, __LINE__, std::this_thread::get_id(), msg)
+#define FATL(msg,...) Logger::getInstance().AddLog(Constant::LogPriority::fatl, __FILE__, __func__, __LINE__, std::this_thread::get_id(), msg)
+
+
+struct LogEntry {
+	LogEntry(Constant::LogPriority lvl, std::string fileName, std::string funcName, int line, std::thread::id id, std::string msg) :
+		FileName(fileName),
+		FuncName(funcName),
+		Msg(msg), Line(line),
+		Level(lvl) 
+	{
+		std::stringstream ss;
+		ss << id;
+		t_id = ss.str();
+	}
+	
+	int Line;
+	std::string Msg;
+	std::string t_id;
+	std::string FileName;
+	std::string FuncName;
+	Constant::LogPriority Level;
+};
 
 
 class Logger {
 
 private:
 	Logger() {
+		Logger::m_activeLogger = true;
 		Logger::m_filePath = "";
-		Logger::m_lengthFileFunc = 10;
-		Logger::m_fileLoggingEnabled = false;
+		Logger::m_logFileName = false;
+		Logger::m_lengthFile = 0;
+		Logger::m_lengthFunc = 3;
+		Logger::m_lengthThreadId = 10;
+		Logger::m_fileLoggingEnabled = true;
 		Logger::m_loggingLevel = Constant::LogPriority::info;
 	}
+
 	~Logger() {
-		std::string logMsg = "\n--- Log Closed at " + getDateTime(Constant::Clock::time) + " ---\n\n\n";
+		std::string logMsg = "\n--- Log Closed at " + Util::getDateTime(Constant::Clock::time) + " ---\n\n\n";
 		if (foutput.is_open()) {
 			foutput << logMsg;
 			foutput.close();
@@ -37,31 +65,63 @@ private:
 		else {
 			std::cout << logMsg;
 		}
-		std::cout << "Logging process ended\n\n\n";
+
+		stopLogging();
+		std::cout << "Logging process has ended\n\n\n";
 	}
 	
-	template<typename... Args>
-	void log(Constant::LogPriority level, std::string fileName, std::string funcName, int line, std::string msg, Args... args) {
-		std::this_thread::sleep_for(std::chrono::milliseconds(500));
-		if (level >= m_loggingLevel) { return; }
+	void logWorker() {
+		while (true) {
+			std::unique_lock<std::mutex> Lock(mtx);
+			CV.wait(Lock, [this] { return !m_logQueue.empty() || !m_activeLogger; });
 
-		std::unique_lock<std::mutex> Lock(mtx);
-		std::ostringstream oss;
-		oss << msg;
-		(void)std::initializer_list<int>{(oss << args, 0)...};
+			if (m_logQueue.empty() && !m_activeLogger) { return; }
 
-		size_t pos = fileName.find_last_of('/\\');
-		if (pos != std::string::npos) { fileName = fileName.substr(pos + 1); }
-		if (fileName.length() > m_lengthFileFunc) { fileName = fileName.substr(0, m_lengthFileFunc); }
-		if (funcName.length() > m_lengthFileFunc) { funcName = funcName.substr(0, m_lengthFileFunc); }
-		
+			auto logEntry = m_logQueue.front();
+			m_logQueue.pop();
+			Lock.unlock();
+
+			Log(logEntry);
+		}
+	}
+
+	void startLogging() {
+		loggingThread = std::thread(&Logger::logWorker, this);
+	}
+
+	void stopLogging() {
+		m_activeLogger = false;
+		CV.notify_all();
+
+		if (loggingThread.joinable()) {
+			loggingThread.join();
+		}
+	}
+
+	void Log(LogEntry entry) {
+
+		if (entry.Level >= m_loggingLevel) { return; }
+
+		std::lock_guard<std::mutex> Lock(mtx);
+
+		if (m_logFileName) {
+			size_t pos = entry.FileName.find_last_of('/\\');
+			if (pos != std::string::npos) { entry.FileName = entry.FileName.substr(pos + 1); }
+			Util::limitStringLength(entry.FileName, m_lengthFile);
+		}
+		Util::limitStringLength(entry.t_id, m_lengthThreadId, true, '0');
+		Util::limitStringLength(entry.FuncName, m_lengthFunc);
+
 		std::ostream& output = (m_fileLoggingEnabled) ? foutput : std::cout;
-		output << getDateTime(Constant::Clock::time) << "  |  ";
-		output << Constant::LogLevel::unmapLoggingLevel(level) << "  |  ";
-		output << std::this_thread::get_id() << "  |  ";
-		output << "[" << fileName << ":" << funcName << ":" << line << "]" << "  |  ";
-		output << oss.str() << "\n";
-		Lock.unlock();
+		output << Util::getDateTime(Constant::Clock::time) << "  |  ";
+		output << Constant::LogLevel::unmapLoggingLevel(entry.Level) << "  |  ";
+		output << entry.t_id << "  |  ";
+		if (m_logFileName) {
+			output << "[" << entry.FileName << ":" << entry.FuncName << ":" << entry.Line << "]" << "\t|  ";
+		} else {
+			output << "[" << entry.FuncName << ":" << entry.Line << "]" << "\t|  ";
+		}
+		output << entry.Msg << "\n";
 	}
 
 public:
@@ -79,12 +139,17 @@ public:
 
 	void RegisterLogger(std::string configPath) {
 
+		startLogging();
+
 		ConfigParser::ParseCfgFile(configPath);
 		m_fileLoggingEnabled = ConfigParser::Get<bool>("Logger.EnableFileLogging", m_fileLoggingEnabled);
 		std::string lvl = ConfigParser::Get<std::string>("Logger.LoggingLevel", "info");
-		m_lengthFileFunc = ConfigParser::Get<int>("Logger.FileFuncDisplayLength", m_lengthFileFunc);
+		m_logFileName = ConfigParser::Get<bool>("Logger.LogFileName", m_logFileName);
+		m_lengthFile = ConfigParser::Get<int>("Logger.FileNameLength", m_lengthFile);
+		m_lengthFunc = ConfigParser::Get<int>("Logger.FuncNameLength", m_lengthFunc);
+		m_lengthThreadId = ConfigParser::Get<int>("Logger.ThreadIdLength", m_lengthThreadId);
 
-		//transforms the debug level to lowercase
+		//transforms the logging level to lowercase
 		std::transform(lvl.begin(), lvl.end(), lvl.begin(), [](unsigned char c) {
 			return std::tolower(c);
 		});
@@ -93,7 +158,7 @@ public:
 
 		if (m_fileLoggingEnabled) {
 			m_filePath = ConfigParser::Get<std::string>("Logger.FilePath", "");
-			if (!checkOrCreateFilePath(m_filePath)) {
+			if (!Util::checkOrCreateFilePath(m_filePath)) {
 				std::cerr << "Error: file path was not present and couldn't be created.\n";
 				return;
 			}
@@ -101,46 +166,37 @@ public:
 			foutput.open(m_filePath, std::ios::app);
 			if (foutput.is_open()) {
 				std::cout << "Opened file: " << m_filePath << " for logging." << std::endl;
-				foutput << "--- New log started at " << getDateTime(Constant::Clock::time) << " ---\n\n";
+				foutput << "--- New log started at " << Util::getDateTime(Constant::Clock::time) << " ---\n\n";
 			}
 			else {
 				std::cerr << "Error: Couldn't open the file stream.\n";
 			}
 		} else {
-			std::cout << "--- New log started at " << getDateTime(Constant::Clock::time) << " ---\n\n";
+			std::cout << "--- New log started at " << Util::getDateTime(Constant::Clock::time) << " ---\n\n";
 			std::cout << "File logging is disabled, didn't register file path.\n";
 		}
 	}
 	
-
-	template<typename... Args>
-	void TraceImpl(std::string fileName, std::string funcName, int line, std::string msg, Args... args) {
-		log(Constant::LogPriority::trace, fileName, funcName, line, msg, args...);
-	}
-
-	template<typename... Args>
-	void DebugImpl(std::string fileName, std::string funcName, int line, std::string msg, Args... args) {
-		log(Constant::LogPriority::debug, fileName, funcName, line, msg, args...);
-	}
-
-	template<typename... Args>
-	void InfoImpl(std::string fileName, std::string funcName, int line, std::string msg, Args... args) {
-		log(Constant::LogPriority::info, fileName, funcName, line, msg, args...);
-	}
-
-	template<typename... Args>
-	void WarnImpl(std::string fileName, std::string funcName, int line, std::string msg, Args... args) {
-		log(Constant::LogPriority::warn, fileName, funcName, line, msg, args...);
-	}
-
-	template<typename... Args>
-	void FatlImpl(std::string fileName, std::string funcName, int line, std::string msg, Args... args) {
-		log(Constant::LogPriority::fatl, fileName, funcName, line, msg, args...);
+	void AddLog(Constant::LogPriority level, std::string fileName, std::string funcName, int line, std::thread::id threadId, std::string msg) {
+		{
+			std::lock_guard<std::mutex> Lock(mtx);
+			LogEntry log_msg(level, fileName, funcName, line, threadId, msg);
+			m_logQueue.push(log_msg);
+		}
+		CV.notify_one();
 	}
 
 private:
 	std::mutex mtx;
-	int m_lengthFileFunc;
+	std::condition_variable CV;
+	std::thread loggingThread;
+	std::queue<LogEntry> m_logQueue;
+	bool m_activeLogger;
+
+	bool m_logFileName;
+	int m_lengthFile;
+	int m_lengthFunc;
+	int m_lengthThreadId;
 	std::ofstream foutput;
 	std::string m_filePath;
 	bool m_fileLoggingEnabled;
