@@ -23,7 +23,7 @@ class ConfigParser {
 private:
     static std::unordered_map<std::string, std::unordered_map<std::string, std::string>> Settings;
 
-    ConfigParser(const std::string& filename) {}
+    ConfigParser() {}
 
 public:
 
@@ -36,32 +36,27 @@ public:
             return;
         }
 
-        std::string currentSection;
+        std::string section;
         while (std::getline(file, line)) {
-            // Skip empty lines and comments
+
             if (line.empty() || line[0] == '#') {
                 continue;
             }
 
-            {   // Removing the starting and trailing spaces
-                auto start = std::find_if_not(line.begin(), line.end(), ::isspace);
-                auto end = std::find_if_not(line.rbegin(), line.rend(), ::isspace).base();
-                if (start < end) {
-                    line = std::string(start, end);
-                }
-            }
+            trim(line);
 
-            // Check if the line represents a section
             if (line[0] == '[' && line.back() == ']') {
-                currentSection = line.substr(1, line.size() - 2);
+                section = line.substr(1, line.size() - 2);
             }
             else {
                 std::istringstream iss(line);
                 std::string key, value;
                 std::getline(iss, key, '=');
                 std::getline(iss, value);
-
-                Settings[currentSection][key] = value;
+                trim(key);
+                trim(value);
+                trim(section);
+                Settings[section][key] = value;
             }
         }
     }
@@ -84,6 +79,11 @@ public:
     }
 
 private:
+    static void trim(std::string& str) {
+        auto start = std::find_if_not(str.begin(), str.end(), ::isspace);
+        auto end = std::find_if_not(str.rbegin(), str.rend(), ::isspace).base();
+        str = std::string(start, end);
+    }
 
     template <typename T>
     static T convert(const std::string& value);
