@@ -1,13 +1,14 @@
 # Logger
 
-*Know issues*
+A lightweight C++ logger that supports configurable log levels, optional file output, and asynchronous queue-based logging on a worker thread.
 
-*	This logger is modified to use a queue based model to add the log message in the queue and then log it
-	using a separate thread so the the caller thread is never blocked. But there is a problem with this,
-	if the caller thread is not blocked and exits before the logger thread then it will alse be able to join 
-	before the logging has finished. Hence the Main thread will also not wait for the loggin to finish due to
-	which I had to add a sleep of 2s at the end of the main() so that the loggin is completed by that time.
+## Recent fixes
 
-*	Need to fix the formatting of the function and file name getting printed.
+- Graceful logger shutdown now drains the queue and joins the worker thread explicitly (`Logger::Shutdown()`), so no `sleep` workaround is required in `main()`.
+- Function/file formatting was improved by using fixed-width output and right-side truncation for long symbols.
+- Logging level parsing now supports human-readable values like `trace` and `debug` from config.
+- `AddLog` was updated to avoid unnecessary string copies by accepting `std::string_view`.
 
-*	Could be made more efficient by not using the std::string.
+## Notes
+
+- `AnyComponent.cfg` controls runtime behavior (level, filename width, thread id width, file logging, etc.).

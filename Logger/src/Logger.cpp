@@ -43,7 +43,7 @@ void loggerTest() {
 
     Logger& logger = Logger::getInstance();
     logger.setLoggingLevel(Constant::LogPriority::trace);
-    logger.RegisterLogger("E:\\MyProject_cpp\\Logger\\Logger\\src\\AnyComponent.cfg");
+    logger.RegisterLogger("Logger/src/AnyComponent.cfg");
 
     std::thread worker[10];
     for (int i = 0; i < 10; i++) { worker[i] = std::thread(print); }
@@ -60,13 +60,13 @@ int main()
 
 
     loggerTest();
-    
+
+    Logger::getInstance().Shutdown();
 
     auto end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> time = end - start;
     std::cout << "\n\n\n---- Total execution time = " << time.count() << std::endl;
 
-    std::this_thread::sleep_for(std::chrono::seconds(2));
 
     return 0;
 }

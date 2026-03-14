@@ -34,8 +34,8 @@ namespace Constant {
 	struct LogLevel {
 		static std::string unmapLoggingLevel(LogPriority priority) {
 			switch (priority) {
-			case LogPriority::trace:	return "trce";
-			case LogPriority::debug:	return "dbug";
+			case LogPriority::trace:	return "trace";
+			case LogPriority::debug:	return "debug";
 			case LogPriority::info:		return "info";
 			case LogPriority::warn:		return "warn";
 			case LogPriority::fatl:		return "fatl";
@@ -43,8 +43,8 @@ namespace Constant {
 			}
 		}
 		static LogPriority mapLoggingLevel(std::string level) {
-			if (level == "trce") { return LogPriority::trace; }
-			else if (level == "dbug") { return LogPriority::debug; }
+			if (level == "trace" || level == "trce") { return LogPriority::trace; }
+			else if (level == "debug" || level == "dbug") { return LogPriority::debug; }
 			else if (level == "info") { return LogPriority::info; }
 			else if (level == "warn") { return LogPriority::warn; }
 			else if (level == "fatl") { return LogPriority::fatl; }
@@ -106,7 +106,12 @@ namespace Util {
 		return timeString.str();
 	}
 
-	void limitStringLength(std::string& str, int length, bool fillRequired = false, char fillChar=' ') {
+	void limitStringLength(std::string& str, int length, bool fillRequired = false, char fillChar=' ', bool trimFromLeft = false) {
+		if (length <= 0) { str.clear(); return; }
+		if (trimFromLeft && static_cast<int>(str.size()) > length) {
+			str = str.substr(str.size() - length);
+		}
+
 		std::vector<char> buffer(length + 1);
 		std::size_t copiedLength = str.copy(buffer.data(), length);
 		if (fillRequired && copiedLength < length) { 

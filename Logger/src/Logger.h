@@ -9,6 +9,8 @@
 #include <algorithm>
 #include <queue>
 #include <condition_variable>
+#include <thread>
+#include <string_view>
 #include "ConfigParser.h"
 #include "Utils.h"
 
@@ -22,7 +24,7 @@
 
 
 struct LogEntry {
-	LogEntry(Constant::LogPriority lvl, std::string fileName, std::string funcName, int line, std::thread::id id, std::string msg) :
+	LogEntry(Constant::LogPriority lvl, std::string_view fileName, std::string_view funcName, int line, std::thread::id id, std::string_view msg) :
 		FileName(fileName),
 		FuncName(funcName),
 		Msg(msg), Line(line),
@@ -57,6 +59,8 @@ private:
 	}
 
 	~Logger() {
+		Shutdown();
+
 		std::string logMsg = "\n--- Log Closed at " + Util::getDateTime(Constant::Clock::time) + " ---\n\n\n";
 		if (foutput.is_open()) {
 			foutput << logMsg;
@@ -65,8 +69,6 @@ private:
 		else {
 			std::cout << logMsg;
 		}
-
-		stopLogging();
 		std::cout << "Logging process has ended\n\n\n";
 	}
 	
@@ -86,6 +88,8 @@ private:
 	}
 
 	void startLogging() {
+		if (loggingThread.joinable()) { return; }
+		m_activeLogger = true;
 		loggingThread = std::thread(&Logger::logWorker, this);
 	}
 
@@ -100,26 +104,27 @@ private:
 
 	void Log(LogEntry entry) {
 
-		if (entry.Level >= m_loggingLevel) { return; }
+		if (entry.Level < m_loggingLevel) { return; }
 
 		std::lock_guard<std::mutex> Lock(mtx);
 
 		if (m_logFileName) {
 			size_t pos = entry.FileName.find_last_of('/\\');
 			if (pos != std::string::npos) { entry.FileName = entry.FileName.substr(pos + 1); }
-			Util::limitStringLength(entry.FileName, m_lengthFile);
+			Util::limitStringLength(entry.FileName, m_lengthFile, false, ' ', true);
 		}
 		Util::limitStringLength(entry.t_id, m_lengthThreadId, true, '0');
-		Util::limitStringLength(entry.FuncName, m_lengthFunc);
+		Util::limitStringLength(entry.FuncName, m_lengthFunc, false, ' ', true);
 
 		std::ostream& output = (m_fileLoggingEnabled) ? foutput : std::cout;
 		output << Util::getDateTime(Constant::Clock::time) << "  |  ";
 		output << Constant::LogLevel::unmapLoggingLevel(entry.Level) << "  |  ";
-		output << entry.t_id << "  |  ";
+		output << std::left << std::setw(m_lengthThreadId) << entry.t_id << "  |  ";
 		if (m_logFileName) {
-			output << "[" << entry.FileName << ":" << entry.FuncName << ":" << entry.Line << "]" << "\t|  ";
+			output << "[" << std::left << std::setw(m_lengthFile) << entry.FileName << ":" 
+				<< std::left << std::setw(m_lengthFunc) << entry.FuncName << ":" << entry.Line << "]" << "\t|  ";
 		} else {
-			output << "[" << entry.FuncName << ":" << entry.Line << "]" << "\t|  ";
+			output << "[" << std::left << std::setw(m_lengthFunc) << entry.FuncName << ":" << entry.Line << "]" << "\t|  ";
 		}
 		output << entry.Msg << "\n";
 	}
@@ -143,7 +148,7 @@ public:
 
 		ConfigParser::ParseCfgFile(configPath);
 		m_fileLoggingEnabled = ConfigParser::Get<bool>("Logger.EnableFileLogging", m_fileLoggingEnabled);
-		std::string lvl = ConfigParser::Get<std::string>("Logger.LoggingLevel", "info");
+		std::string lvl = ConfigParser::Get<std::string>("Logger.Level", "info");
 		m_logFileName = ConfigParser::Get<bool>("Logger.LogFileName", m_logFileName);
 		m_lengthFile = ConfigParser::Get<int>("Logger.FileNameLength", m_lengthFile);
 		m_lengthFunc = ConfigParser::Get<int>("Logger.FuncNameLength", m_lengthFunc);
@@ -177,13 +182,16 @@ public:
 		}
 	}
 	
-	void AddLog(Constant::LogPriority level, std::string fileName, std::string funcName, int line, std::thread::id threadId, std::string msg) {
+	void AddLog(Constant::LogPriority level, std::string_view fileName, std::string_view funcName, int line, std::thread::id threadId, std::string_view msg) {
 		{
 			std::lock_guard<std::mutex> Lock(mtx);
-			LogEntry log_msg(level, fileName, funcName, line, threadId, msg);
-			m_logQueue.push(log_msg);
+			m_logQueue.emplace(level, fileName, funcName, line, threadId, msg);
 		}
 		CV.notify_one();
+	}
+
+	void Shutdown() {
+		stopLogging();
 	}
 
 private:
