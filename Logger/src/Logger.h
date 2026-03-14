@@ -97,7 +97,7 @@ private:
 		stopLogging();
 
 		std::string logMsg = "\n--- Log Closed at " + Util::getDateTime(Constant::Clock::time) + " ---\n\n\n";
-		if (foutput.is_open()) {
+		if (m_fileLoggingEnabled) {
 			foutput << logMsg;
 			foutput.close();
 		}
