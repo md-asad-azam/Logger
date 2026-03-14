@@ -12,11 +12,11 @@
 namespace Constant {
 
 	enum LogPriority {
-		trace,
-		debug,
-		info,
-		warn,
-		fatl
+		trace = 1,
+		debug = 5,
+		info  = 25,
+		warn  = 50,
+		fatl  = 100
 	};
 
 	enum Clock {
@@ -106,12 +106,18 @@ namespace Util {
 		return timeString.str();
 	}
 
-	void limitStringLength(std::string& str, int length, bool fillRequired = false, char fillChar=' ') {
+	void limitStringLength(std::string& str, int length, bool fillRequired = false, char fillChar = ' ', bool trimFromLeft = false) {
+		if (length <= 0) { str.clear(); return; }
+		if (trimFromLeft && static_cast<int>(str.size()) > length) {
+			str = str.substr(str.size() - length);
+		}
+
 		std::vector<char> buffer(length + 1);
 		std::size_t copiedLength = str.copy(buffer.data(), length);
-		if (fillRequired && copiedLength < length) { 
-			std::fill(buffer.begin() + copiedLength, buffer.begin() + length, fillChar); 
-		} else {
+		if (fillRequired && copiedLength < length) {
+			std::fill(buffer.begin() + copiedLength, buffer.begin() + length, fillChar);
+		}
+		else {
 			length = copiedLength;
 		}
 

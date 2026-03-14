@@ -8,6 +8,7 @@
 #include <mutex>
 #include <algorithm>
 #include <queue>
+#include <thread>
 #include <condition_variable>
 #include "ConfigParser.h"
 #include "Utils.h"
@@ -49,25 +50,15 @@ private:
 		Logger::m_activeLogger = true;
 		Logger::m_filePath = "";
 		Logger::m_logFileName = false;
-		Logger::m_lengthFile = 0;
-		Logger::m_lengthFunc = 3;
-		Logger::m_lengthThreadId = 10;
+		Logger::m_lengthFile = 20;
+		Logger::m_lengthFunc = 20;
+		Logger::m_lengthThreadId = 20;
 		Logger::m_fileLoggingEnabled = true;
 		Logger::m_loggingLevel = Constant::LogPriority::info;
 	}
 
 	~Logger() {
-		std::string logMsg = "\n--- Log Closed at " + Util::getDateTime(Constant::Clock::time) + " ---\n\n\n";
-		if (foutput.is_open()) {
-			foutput << logMsg;
-			foutput.close();
-		}
-		else {
-			std::cout << logMsg;
-		}
-
-		stopLogging();
-		std::cout << "Logging process has ended\n\n\n";
+		shutdown();
 	}
 	
 	void logWorker() {
@@ -86,7 +77,10 @@ private:
 	}
 
 	void startLogging() {
+		if (loggingThread.joinable()) { return; }
+		m_activeLogger = true;
 		loggingThread = std::thread(&Logger::logWorker, this);
+		m_logging_start_time = std::chrono::high_resolution_clock::now();
 	}
 
 	void stopLogging() {
@@ -98,19 +92,38 @@ private:
 		}
 	}
 
+	void shutdown() {
+		
+		stopLogging();
+
+		std::string logMsg = "\n--- Log Closed at " + Util::getDateTime(Constant::Clock::time) + " ---\n\n\n";
+		if (foutput.is_open()) {
+			foutput << logMsg;
+			foutput.close();
+		}
+		else {
+			std::cout << logMsg;
+		}
+
+
+		auto end = std::chrono::high_resolution_clock::now();
+		std::chrono::duration<double> time = end - m_logging_start_time;
+		std::cout << "\n\n\nTotal execution time = " << time.count() << std::endl;
+	}
+
 	void Log(LogEntry entry) {
 
-		if (entry.Level >= m_loggingLevel) { return; }
+		if (entry.Level < m_loggingLevel) { return; }
 
 		std::lock_guard<std::mutex> Lock(mtx);
 
 		if (m_logFileName) {
 			size_t pos = entry.FileName.find_last_of('/\\');
 			if (pos != std::string::npos) { entry.FileName = entry.FileName.substr(pos + 1); }
-			Util::limitStringLength(entry.FileName, m_lengthFile);
+			Util::limitStringLength(entry.FileName, m_lengthFile, false, ' ', true);
 		}
-		Util::limitStringLength(entry.t_id, m_lengthThreadId, true, '0');
-		Util::limitStringLength(entry.FuncName, m_lengthFunc);
+		Util::limitStringLength(entry.t_id, m_lengthThreadId, true);
+		Util::limitStringLength(entry.FuncName, m_lengthFunc, false, ' ', true);
 
 		std::ostream& output = (m_fileLoggingEnabled) ? foutput : std::cout;
 		output << Util::getDateTime(Constant::Clock::time) << "  |  ";
@@ -141,9 +154,16 @@ public:
 
 		startLogging();
 
-		ConfigParser::ParseCfgFile(configPath);
+		try {
+			ConfigParser::ParseCfgFile(configPath);
+		}
+		catch (std::invalid_argument e) {
+			std::cerr << e.what() << std::endl;
+			return;
+		}
+
 		m_fileLoggingEnabled = ConfigParser::Get<bool>("Logger.EnableFileLogging", m_fileLoggingEnabled);
-		std::string lvl = ConfigParser::Get<std::string>("Logger.LoggingLevel", "info");
+		std::string lvl = ConfigParser::Get<std::string>("Logger.Level", "info");
 		m_logFileName = ConfigParser::Get<bool>("Logger.LogFileName", m_logFileName);
 		m_lengthFile = ConfigParser::Get<int>("Logger.FileNameLength", m_lengthFile);
 		m_lengthFunc = ConfigParser::Get<int>("Logger.FuncNameLength", m_lengthFunc);
@@ -183,7 +203,7 @@ public:
 			LogEntry log_msg(level, fileName, funcName, line, threadId, msg);
 			m_logQueue.push(log_msg);
 		}
-		CV.notify_one();
+		CV.notify_all(); // doesn't matter if we notify_one or all we are usign 1 logger thread.
 	}
 
 private:
@@ -201,4 +221,6 @@ private:
 	std::string m_filePath;
 	bool m_fileLoggingEnabled;
 	Constant::LogPriority m_loggingLevel;
+
+	std::chrono::steady_clock::time_point m_logging_start_time;
 };
