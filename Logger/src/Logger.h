@@ -10,7 +10,7 @@
 #include <queue>
 #include <condition_variable>
 #include <thread>
-#include <string_view>
+#include <string>
 #include "ConfigParser.h"
 #include "Utils.h"
 
@@ -24,7 +24,7 @@
 
 
 struct LogEntry {
-	LogEntry(Constant::LogPriority lvl, std::string_view fileName, std::string_view funcName, int line, std::thread::id id, std::string_view msg) :
+	LogEntry(Constant::LogPriority lvl, std::string fileName, std::string funcName, int line, std::thread::id id, std::string msg) :
 		FileName(fileName),
 		FuncName(funcName),
 		Msg(msg), Line(line),
@@ -182,7 +182,7 @@ public:
 		}
 	}
 	
-	void AddLog(Constant::LogPriority level, std::string_view fileName, std::string_view funcName, int line, std::thread::id threadId, std::string_view msg) {
+	void AddLog(Constant::LogPriority level, std::string fileName, std::string funcName, int line, std::thread::id threadId, std::string msg) {
 		{
 			std::lock_guard<std::mutex> Lock(mtx);
 			m_logQueue.emplace(level, fileName, funcName, line, threadId, msg);
