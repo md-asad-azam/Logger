@@ -32,8 +32,7 @@ public:
         std::string line;
 
         if (!file.is_open()) {
-            std::cerr << "Unable to open the config file." << std::endl;
-            return;
+            throw std::invalid_argument("Error: Unable to open the config file = " + filename);
         }
 
         std::string section;
